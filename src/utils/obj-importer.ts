@@ -136,8 +136,8 @@ export async function importOBJFile(file: File): Promise<OBJImportSummary> {
                 });
                 
                 // Create mesh in our geometry store
-                const mesh = createMeshFromGeometry(vertices, faces);
-                mesh.name = obj.name || 'Mesh';
+                const meshName = obj.name || 'Mesh';
+                const mesh = createMeshFromGeometry(meshName, vertices, faces);
                 const meshId = geom.addMesh(mesh);
                 createdMeshIds.push(meshId);
                 
