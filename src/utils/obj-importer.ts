@@ -29,6 +29,12 @@ function toVec3(x: number, y: number, z: number): GVec3 {
 function buildGeometryFromThreeGeometry(geo: any): { vertices: Vertex[]; faces: Face[] } {
     const pos = geo.getAttribute('position');
     if (!pos) throw new Error('Mesh has no position attribute');
+    
+    // OBJLoader might not compute normals automatically
+    if (!geo.getAttribute('normal')) {
+        geo.computeVertexNormals();
+    }
+    
     const nor = geo.getAttribute('normal');
     const uv = geo.getAttribute('uv');
     
@@ -91,6 +97,10 @@ export async function importOBJFile(file: File): Promise<OBJImportSummary> {
     const nameBase = file.name.replace(/\.obj$/i, '');
     const rootGroupId = scene.createGroupObject(`Imported ${nameBase}`);
     
+    // Add root group to created objects so it's visible
+    const createdObjectIds: string[] = [rootGroupId];
+    const createdMeshIds: string[] = [];
+    
     // Dynamically import Three.js OBJLoader
     const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader.js');
     const loader = new OBJLoader();
@@ -101,21 +111,37 @@ export async function importOBJFile(file: File): Promise<OBJImportSummary> {
     // Parse OBJ with Three.js
     const group = loader.parse(content);
     
-    const createdObjectIds: string[] = [];
-    const createdMeshIds: string[] = [];
+    console.log('OBJ Loader result:', group);
+    console.log('Children count:', group.children?.length);
     
     // Recursively process Three.js scene graph
     const processObject = (obj: any, parentId: string) => {
+        console.log('Processing object:', obj.type, obj.name, obj);
+        
         if (obj.type === 'Mesh' && obj.geometry) {
             try {
+                console.log('Geometry attributes:', {
+                    position: obj.geometry.getAttribute('position')?.count,
+                    normal: obj.geometry.getAttribute('normal')?.count,
+                    uv: obj.geometry.getAttribute('uv')?.count,
+                    index: obj.geometry.index?.count
+                });
+                
                 // Convert Three.js geometry to our format
                 const { vertices, faces } = buildGeometryFromThreeGeometry(obj.geometry);
+                
+                console.log('Converted geometry:', {
+                    vertices: vertices.length,
+                    faces: faces.length
+                });
                 
                 // Create mesh in our geometry store
                 const mesh = createMeshFromGeometry(vertices, faces);
                 mesh.name = obj.name || 'Mesh';
                 const meshId = geom.addMesh(mesh);
                 createdMeshIds.push(meshId);
+                
+                console.log('Created mesh:', meshId, mesh);
                 
                 // Create scene object for this mesh
                 const objId = scene.createMeshObject(mesh.name, meshId);
@@ -126,7 +152,9 @@ export async function importOBJFile(file: File): Promise<OBJImportSummary> {
                 scene.setTransform(objId, transform);
                 
                 createdObjectIds.push(objId);
+                console.log('Created object:', objId);
             } catch (err) {
+                console.error('Error importing mesh:', err);
                 warnings.push(`Failed to import mesh ${obj.name}: ${err}`);
             }
         } else if (obj.type === 'Group') {
@@ -157,9 +185,17 @@ export async function importOBJFile(file: File): Promise<OBJImportSummary> {
     };
     
     // Process the root group
-    if (group.children) {
+    if (group.children && group.children.length > 0) {
         for (const child of group.children) {
             processObject(child, rootGroupId);
+        }
+    } else {
+        // Sometimes OBJLoader returns the mesh directly as the group
+        if (group.type === 'Mesh' && group.geometry) {
+            processObject(group, rootGroupId);
+        } else {
+            warnings.push('OBJLoader returned unexpected structure');
+            console.error('Unexpected OBJ structure:', group);
         }
     }
     
